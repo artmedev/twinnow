@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, nativeImage } = require('electron');
 const fs = require('fs'), fsp = fs.promises, path = require('path');
 
 const EXT = new Set(['.jpg', '.jpeg', '.png', '.bmp', '.gif', '.webp', '.tif', '.tiff']);
@@ -33,5 +33,46 @@ ipcMain.handle('scan', async (e, root) => {
   }
   await walk(root);
   return out;
+});
+
+const hashCache = new Map();
+async function dhash(file) {
+  if (hashCache.has(file)) return hashCache.get(file);
+  let h = null;
+  try {
+    let img = await nativeImage.createThumbnailFromPath(file, { width: 64, height: 64 }).catch(() => null);
+    if (!img || img.isEmpty()) img = nativeImage.createFromPath(file);
+    if (!img.isEmpty()) {
+      const b = img.resize({ width: 9, height: 8, quality: 'good' }).toBitmap(); // BGRA
+      const g = i => b[i * 4] * 0.11 + b[i * 4 + 1] * 0.59 + b[i * 4 + 2] * 0.3;
+      h = [];
+      for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) h.push(g(y * 9 + x) > g(y * 9 + x + 1) ? 1 : 0);
+    }
+  } catch {}
+  hashCache.set(file, h);
+  return h;
+}
+const dist = (a, b) => { let d = 0; for (let i = 0; i < 64; i++) d += a[i] !== b[i]; return d; };
+
+// Group similar photos in folder
+ipcMain.handle('groups', async (e, dir, thr = 12) => {
+  const files = (await fsp.readdir(dir)).filter(isImg).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).map(f => path.join(dir, f));
+  const groups = [];
+  for (const f of files) {
+    const h = await dhash(f);
+    const g = h && groups.find(g => g.h && dist(g.h, h) <= thr);
+    if (g) g.files.push(f); else groups.push({ h, files: [f] });
+  }
+  return groups.map(g => g.files);
+});
+
+ipcMain.handle('thumb', async (e, file) => {
+  try {
+    const img = await nativeImage.createThumbnailFromPath(file, { width: 200, height: 200 });
+    return img.toDataURL();
+  } catch {
+    const img = nativeImage.createFromPath(file);
+    return img.isEmpty() ? '' : img.resize({ height: 160 }).toDataURL();
+  }
 });
 

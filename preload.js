@@ -1,6 +1,6 @@
 const { contextBridge, ipcRenderer } = require('electron');
 const call = ch => (...a) => ipcRenderer.invoke(ch, ...a);
 contextBridge.exposeInMainWorld('api', {
-  pickDir: call('pickDir'), scan: call('scan'),
+  pickDir: call('pickDir'), scan: call('scan'), groups: call('groups'), thumb: call('thumb'),
   onScan: cb => ipcRenderer.on('scanProgress', (e, n) => cb(n)),
 });
